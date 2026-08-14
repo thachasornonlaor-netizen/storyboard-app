@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# Environment
+.env
+.env.*
+
+# Cached data / generated artifacts
+ai-service/data/
+
+# OS
+.DS_Store

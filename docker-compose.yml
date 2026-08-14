@@ -1,0 +1,29 @@
+services:
+  ai-service:
+    build: ./ai-service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ai-service/data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+
+  backend:
+    build: ./backend
+    ports:
+      - "3001:3001"
+    depends_on:
+      - ai-service
+    environment:
+      - AI_SERVICE_URL=http://ai-service:8000
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend/src:/app/src
