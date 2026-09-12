@@ -84,31 +84,46 @@ def extract_search_keywords(text):
     return " ".join(dict.fromkeys(kept))
 
 
-def search_youtube(query, max_results=12):
-    """Find official trailers/teasers for the query on YouTube.
+NON_MOVIE_MARKERS = (
+    "music video", "official mv", "gameplay", "reaction", "let's play",
+    "lego", "minecraft", "gta", "fortnite", "roblox", "explained",
+    "review", "analysis", "cgi animation", "blender", "3d animation",
+    "short film", "animation demo", "modeling",
+)
 
-    The query can be a movie name ("Inception") or a shot description
-    ("low angle close up of a car at night"); for descriptions only the
-    subject keywords are used so the search actually finds relevant trailers.
-    Only videos whose title mentions a trailer or teaser are accepted, so the
-    reference material stays cinematic (no fan edits, clips, or compilations).
+
+def _looks_like_non_movie(title):
+    low = title.lower()
+    return any(m in low for m in NON_MOVIE_MARKERS)
+
+
+def search_youtube(query, max_results=12):
+    """Find movie trailers/teasers for the query, falling back to real movie
+    scene clips when a shot description has no trailer to point at.
+
+    Trailers are always preferred and processed first. Scene clips only enter
+    the pool when fewer than 3 trailers are found, so a shot like "car chase at
+    night" still gets real cinematic footage to match against.
     """
     keywords = extract_search_keywords(query)
-    if keywords:
-        base = keywords
-    else:
-        base = query
+    base = keywords or query
 
-    candidate_queries = [
+    trailer_queries = [
         f"{base} official trailer",
         f"{base} teaser",
         f"{base} movie trailer",
         f"{base} trailer",
     ]
+    scene_queries = [
+        f"{base} movie scene",
+        f"{base} movie clip",
+        f"{base} scene film",
+    ]
 
     trailer_ids = {}
+    scene_ids = {}
 
-    def run_search(search_query):
+    def run_search(search_query, allow_scenes):
         try:
             proc = subprocess.Popen(
                 ["yt-dlp",
@@ -134,23 +149,38 @@ def search_youtube(query, max_results=12):
                 video_id = parts[0]
                 title = parts[1]
                 duration = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 0
-                lower = title.lower()
-                if not any(k in lower for k in ("trailer", "teaser")):
+                if _looks_like_non_movie(title):
                     continue
                 if not (60 <= duration < 600):
                     continue
-                if video_id not in trailer_ids:
+                lower = title.lower()
+                is_trailer = "trailer" in lower or "teaser" in lower
+                if video_id in trailer_ids:
+                    continue
+                if is_trailer:
+                    if video_id in scene_ids:
+                        scene_ids.pop(video_id, None)
                     trailer_ids[video_id] = (video_id, title, duration)
+                elif allow_scenes and video_id not in scene_ids:
+                    scene_ids[video_id] = (video_id, title, duration)
         except Exception:
             pass
 
-    for q in candidate_queries:
-        run_search(q)
-        if len(trailer_ids) >= 6:
+    for q in trailer_queries:
+        run_search(q, allow_scenes=False)
+        if len(trailer_ids) >= 5:
             break
 
-    videos = list(trailer_ids.values())
-    videos.sort(key=lambda v: (0 if "official" in v[1].lower() else 1, v[1].lower()))
+    if len(trailer_ids) < 3:
+        for q in scene_queries:
+            run_search(q, allow_scenes=True)
+            if len(trailer_ids) + len(scene_ids) >= 6:
+                break
+
+    trailers = list(trailer_ids.values())
+    trailers.sort(key=lambda v: (0 if "official" in v[1].lower() else 1, v[1].lower()))
+    scenes = list(scene_ids.values())
+    videos = trailers + scenes
     return videos
 
 def download_video(video_id):

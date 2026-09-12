@@ -20,7 +20,11 @@ PLACEHOLDER_KEYS = {
 
 def vlm_configured():
     key = GEMINI_API_KEY.strip()
-    if not key or key.lower() in PLACEHOLDER_KEYS:
+    if not key:
+        return False
+    if key.lower() in PLACEHOLDER_KEYS:
+        return False
+    if not key.startswith("AIza"):
         return False
     return True
 
