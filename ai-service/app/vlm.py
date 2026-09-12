@@ -12,9 +12,17 @@ MAX_IMAGES_PER_REQUEST = 8
 TIMEOUT = 60
 MAX_RETRIES = 2
 
+PLACEHOLDER_KEYS = {
+    "", "your_key_here", "your_api_key", "your-api-key", "put_your_key_here",
+    "changeme", "change_me", "none", "null", "sample_key", "api_key",
+}
+
 
 def vlm_configured():
-    return bool(GEMINI_API_KEY.strip())
+    key = GEMINI_API_KEY.strip()
+    if not key or key.lower() in PLACEHOLDER_KEYS:
+        return False
+    return True
 
 
 def _extract_json(text):
@@ -88,6 +96,16 @@ def build_shot_prompt(shot_text, requirements, count):
         "When explicit requirements are given, base 'overall' on the WEAKEST stated requirement "
         "(a chain is only as strong as its weakest link). When no requirements are given, base "
         "'overall' on how well the still matches the shot description."
+    )
+    lines.append(
+        "How to judge the image itself (do NOT guess from the text alone): "
+        "'shot_size' comes from how much of the frame the subject/face occupies - extreme close up = "
+        "a single detail fills the frame, close up = face fills most of the frame, medium = waist up, "
+        "wide = full body with room around it. "
+        "'camera_angle' comes from the camera's vertical position relative to the subject - look at "
+        "whether you are seeing the subject from below (low angle, subject above the horizon of the lens), "
+        "level with their eyes, or from above (high angle, looking down on them). "
+        "'camera_movement' comes from motion blur / background streaking in the still."
     )
     lines.append(
         f"Return ONLY a JSON array with exactly {count} objects, one per image, in the SAME ORDER "

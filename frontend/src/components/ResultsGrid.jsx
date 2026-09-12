@@ -20,7 +20,7 @@ export default function ResultsGrid({ results, onAdd }) {
             />
           </svg>
         </div>
-        <p className="mt-4 text-sm text-slate-400">
+        <p className="mt-4 text-base text-slate-400">
           No frames found. Try a different search or adjust your filters.
         </p>
       </div>

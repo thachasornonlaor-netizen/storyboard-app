@@ -1,0 +1,27 @@
+# 100% free deployment (backend + AI service only).
+# Frontend is hosted separately (e.g. Netlify) and pointed at this backend
+# via VITE_API_URL when building.
+#
+#   docker compose -f docker-compose.onprem.yml up -d --build
+#
+services:
+  ai-service:
+    build: ./ai-service
+    restart: unless-stopped
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+    volumes:
+      - ./ai-service/data:/app/data
+    expose:
+      - "8000"
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      - ai-service
+    environment:
+      - AI_SERVICE_URL=http://ai-service:8000
+    ports:
+      - "3001:3001"

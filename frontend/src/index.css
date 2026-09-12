@@ -9,6 +9,10 @@
   --color-glow: #a5b4fc;
 }
 
+html {
+  font-size: 18px;
+}
+
 html,
 body,
 #root {
@@ -65,4 +69,48 @@ body {
 
 .animate-pulse-glow {
   animation: pulse-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes gradient-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animate-gradient-flow {
+  animation: gradient-flow 5s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-14px);
+  }
+}
+
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+
+@keyframes float-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-float-in {
+  animation: float-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
 }

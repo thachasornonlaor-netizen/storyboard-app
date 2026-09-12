@@ -69,6 +69,22 @@ app.get('/api/health', async (req, res) => {
   }
 })
 
+app.use('/frames', async (req, res) => {
+  try {
+    const upstream = await fetch(`${AI_SERVICE_URL}/frames${req.url}`)
+    if (!upstream.ok) {
+      res.status(upstream.status).end()
+      return
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer())
+    res.set('Content-Type', upstream.headers.get('content-type') || 'image/jpeg')
+    res.set('Cache-Control', 'public, max-age=3600')
+    res.send(buf)
+  } catch (err) {
+    res.status(502).end('upstream error')
+  }
+})
+
 app.listen(3001, () => {
   console.log('Backend running on http://localhost:3001')
 })

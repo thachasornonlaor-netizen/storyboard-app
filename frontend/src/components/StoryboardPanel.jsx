@@ -1,17 +1,19 @@
+import { frameUrl } from '../config'
+
 export default function StoryboardPanel({ storyboard, onRemove, onClear }) {
   return (
     <div className="p-5">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+        <h2 className="text-base font-semibold uppercase tracking-wider text-slate-400">
           Storyboard{' '}
-          <span className="ml-1 rounded-full bg-accent/20 px-2 py-0.5 text-xs font-bold text-accent-2">
+          <span className="ml-1 rounded-full bg-accent/20 px-2 py-0.5 text-sm font-bold text-accent-2">
             {storyboard.length}
           </span>
         </h2>
         {storyboard.length > 0 && (
           <button
             onClick={onClear}
-            className="text-xs font-medium text-rose-400 transition hover:text-rose-300"
+            className="text-sm font-medium text-rose-400 transition hover:text-rose-300"
           >
             Clear all
           </button>
@@ -20,7 +22,7 @@ export default function StoryboardPanel({ storyboard, onRemove, onClear }) {
 
       {storyboard.length === 0 && (
         <div className="rounded-xl border border-dashed border-white/15 p-6 text-center">
-          <p className="text-xs leading-relaxed text-slate-500">
+          <p className="text-sm leading-relaxed text-slate-500">
             Click "+ Add to Storyboard" on any frame to start building your shot list.
           </p>
         </div>
@@ -34,20 +36,20 @@ export default function StoryboardPanel({ storyboard, onRemove, onClear }) {
             style={{ animationDelay: `${i * 40}ms` }}
           >
             <div className="relative shrink-0">
-              <span className="absolute -left-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 text-[10px] font-bold text-white shadow-md shadow-accent/30">
+              <span className="absolute -left-1.5 -top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 text-xs font-bold text-white shadow-md shadow-accent/30">
                 {i + 1}
               </span>
               <img
-                src={frame.image_url}
+                src={frameUrl(frame.image_url)}
                 alt={frame.description}
-                className="h-14 w-20 rounded-lg object-cover"
+                className="h-16 w-24 rounded-lg object-cover"
               />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="line-clamp-2 text-xs leading-snug text-slate-200">
+              <p className="line-clamp-2 text-sm leading-snug text-slate-200">
                 {frame.description}
               </p>
-              <p className="mt-1 truncate text-[10px] text-slate-500">
+              <p className="mt-1 truncate text-xs text-slate-500">
                 {frame.film} · {frame.timestamp}
               </p>
             </div>

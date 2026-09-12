@@ -16,7 +16,7 @@ Then open http://localhost:5173.
 
 Searching for a movie is easy. The interesting part is how the app figures out
 *which* frames actually fit your shot — and that's where the two-stage pipeline
-comes in:
+comes in:   ``
 
 1. **CLIP** does the fast, cheap pass — it finds candidate frames that loosely
    match your description.

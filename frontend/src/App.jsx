@@ -3,15 +3,18 @@ import SearchBar from './components/SearchBar'
 import FilterPanel from './components/FilterPanel'
 import ResultsGrid from './components/ResultsGrid'
 import StoryboardPanel from './components/StoryboardPanel'
+import LandingPage from './components/LandingPage'
+import { apiUrl } from './config'
 
 function App() {
+  const [started, setStarted] = useState(false)
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
   const [storyboard, setStoryboard] = useState([])
   const [cachedMovies, setCachedMovies] = useState([])
   const [metadataFilters, setMetadataFilters] = useState({})
   const [selectedFilters, setSelectedFilters] = useState({
-    camera_angle: [], shot_size: [], camera_movement: [],
+    camera_angle: [], shot_size: [],
     mood: [], tone: [], lighting: []
   })
   const [lastQuery, setLastQuery] = useState('')
@@ -24,11 +27,11 @@ function App() {
   }, [])
 
   const fetchFilters = () => {
-    fetch('/api/filters').then(r => r.json())
+    fetch(apiUrl('/api/filters')).then(r => r.json())
       .then(data => {
         setCachedMovies(data.movies || [])
         const meta = {}
-        const cats = ['camera_angle', 'shot_size', 'camera_movement', 'mood', 'tone', 'lighting']
+        const cats = ['camera_angle', 'shot_size', 'mood', 'tone', 'lighting']
         cats.forEach(c => { meta[c] = data[c] || [] })
         setMetadataFilters(meta)
       })
@@ -57,7 +60,7 @@ function App() {
     setLastQuery(effectiveQuery)
     lastQueryRef.current = effectiveQuery
     try {
-      const res = await fetch(`/api/search?${qs}`)
+      const res = await fetch(apiUrl(`/api/search?${qs}`))
       const data = await res.json()
       setResults(data.frames || [])
       setAppliedFilters(data.applied_filters || {})
@@ -75,7 +78,7 @@ function App() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`/api/search?film=${encodeURIComponent(movieSlug)}`)
+      const res = await fetch(apiUrl(`/api/search?film=${encodeURIComponent(movieSlug)}`))
       const data = await res.json()
       setResults(data.frames || [])
     } catch (err) {
@@ -109,25 +112,29 @@ function App() {
   const formatFilterLabel = (val) =>
     val.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 
+  if (!started) {
+    return <LandingPage onEnter={() => setStarted(true)} />
+  }
+
   return (
-    <div className="flex h-screen flex-col bg-surface text-slate-200">
+    <div className="flex h-screen flex-col bg-surface text-slate-200 animate-fade-in-up">
       <header className="flex items-center justify-between border-b border-white/10 bg-panel/70 px-6 py-4 backdrop-blur-xl">
         <div className="flex items-center gap-3">
           <img
             src="/frame-finder-logo.png"
             alt="FrameFinder AI logo"
-            className="h-10 w-auto drop-shadow-[0_0_12px_rgba(129,140,248,0.35)]"
+            className="h-11 w-auto animate-float drop-shadow-[0_0_12px_rgba(129,140,248,0.35)]"
           />
           <div>
-            <h1 className="bg-gradient-to-r from-accent-2 to-glow bg-clip-text text-xl font-bold tracking-tight text-transparent">
+            <h1 className="bg-gradient-to-r from-accent-2 to-glow bg-clip-text text-2xl font-bold tracking-tight text-transparent">
               FrameFinder AI
             </h1>
-            <p className="text-xs text-slate-400">
+            <p className="text-sm text-slate-400">
               Describe the shot you want — AI finds matching frames from movie trailers
             </p>
           </div>
         </div>
-        <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-xs text-slate-400 sm:flex">
+        <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-sm text-slate-400 sm:flex">
           <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse-glow" />
           Semantic frame search
         </div>
@@ -149,24 +156,24 @@ function App() {
           <div className="mx-auto max-w-6xl">
             <div className="mb-5 flex items-center justify-between">
               {hasResults ? (
-                <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+                <h2 className="text-base font-semibold uppercase tracking-wider text-slate-400">
                   {results.length} frames found
                 </h2>
               ) : (
                 !loading && (
-                  <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+                  <h2 className="text-base font-semibold uppercase tracking-wider text-slate-400">
                     Search results
                   </h2>
                 )
               )}
               {appliedFilterEntries.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-slate-500">Detected:</span>
+                  <span className="text-sm text-slate-500">Detected:</span>
                   {appliedFilterEntries.map(([cat, vals]) =>
                     vals.map(v => (
                       <span
                         key={`${cat}-${v}`}
-                        className="rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-glow"
+                        className="rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-sm font-medium text-glow"
                       >
                         {formatFilterLabel(v)}
                       </span>
@@ -179,14 +186,14 @@ function App() {
             {loading && (
               <div className="flex flex-col items-center justify-center py-32 text-center">
                 <div className="h-12 w-12 animate-spin rounded-full border-4 border-accent/20 border-t-accent-2" />
-                <p className="mt-4 text-sm text-slate-400 animate-pulse-glow">
+                <p className="mt-4 text-base text-slate-400 animate-pulse-glow">
                   Searching frames...
                 </p>
               </div>
             )}
 
             {error && !loading && (
-              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-5 py-4 text-sm text-rose-300">
+              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-5 py-4 text-base text-rose-300">
                 {error}
               </div>
             )}

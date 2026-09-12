@@ -15,7 +15,7 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from filter_parser import parse_filters_from_text
+from filter_parser import parse_filters_from_text, FILTER_SYNONYMS, CATEGORIES
 from vision import (
     compute_composition_features,
     score_shot_size_geometry,
@@ -34,9 +34,9 @@ os.makedirs(EXTRACTED_DIR, exist_ok=True)
 TEMP_VIDEO_DIR = "/tmp/storyboard_videos"
 os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
 
-MAX_VIDEOS_TO_PROCESS = 3
-FRAME_INTERVAL = 30
-TOP_FRAMES_PER_VIDEO = 20
+MAX_VIDEOS_TO_PROCESS = 5
+FRAME_INTERVAL = 60
+TOP_FRAMES_PER_VIDEO = 8
 MAX_RESULTS = 24
 
 def slugify(text):
@@ -44,37 +44,114 @@ def slugify(text):
     s = re.sub(r'[^a-z0-9]+', '_', s)
     return s.strip('_')
 
-def search_youtube(query, max_results=10):
-    try:
-        proc = subprocess.Popen(
-            ["yt-dlp",
-             "--print", "%(id)s\t%(title)s\t%(duration)s",
-             "--no-warnings", "--ignore-errors",
-             f"ytsearch{max_results}:{query} movie scene"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
-        )
+STOPWORDS = {
+    "a", "an", "the", "of", "in", "on", "at", "with", "and", "or", "but",
+    "to", "for", "from", "into", "over", "under", "during", "while", "through",
+    "shot", "shots", "scene", "scenes", "frame", "still", "looking", "shows",
+    "cinematic", "film", "movie", "camera", "angle", "angles", "view", "views",
+    "mood", "moods", "tone", "tones", "lighting", "style", "very", "really",
+    "some", "one", "two", "use", "using", "show", "like", "just", "you", "your",
+}
+
+CINEMA_WORDS = set(STOPWORDS)
+for _cat in CATEGORIES:
+    for _phrase, _val in FILTER_SYNONYMS[_cat]:
+        for _tok in _phrase.split():
+            CINEMA_WORDS.add(_tok)
+
+
+def extract_search_keywords(text):
+    """Pull the subject nouns out of a shot description so it can be used as a
+    YouTube trailer search. Only multi-word cinematography phrases are removed
+    (e.g. "low angle", "close up") so useful subject words like "night" or
+    "neon" survive.
+
+    "low angle close up of a car at night, tense mood, neon lighting"
+    -> "car night neon lighting tense mood"  (subject + descriptive keywords)
+    """
+    if not text:
+        return ""
+    lowered = text.lower()
+    for _cat in CATEGORIES:
+        for _phrase, _val in FILTER_SYNONYMS[_cat]:
+            if _phrase.count(" ") >= 1:
+                lowered = re.sub(rf"\b{re.escape(_phrase)}\b", " ", lowered)
+    tokens = re.findall(r"[a-z0-9]+", lowered)
+    kept = [
+        t for t in tokens
+        if len(t) >= 3 and t not in STOPWORDS
+    ]
+    return " ".join(dict.fromkeys(kept))
+
+
+def search_youtube(query, max_results=12):
+    """Find official trailers/teasers for the query on YouTube.
+
+    The query can be a movie name ("Inception") or a shot description
+    ("low angle close up of a car at night"); for descriptions only the
+    subject keywords are used so the search actually finds relevant trailers.
+    Only videos whose title mentions a trailer or teaser are accepted, so the
+    reference material stays cinematic (no fan edits, clips, or compilations).
+    """
+    keywords = extract_search_keywords(query)
+    if keywords:
+        base = keywords
+    else:
+        base = query
+
+    candidate_queries = [
+        f"{base} official trailer",
+        f"{base} teaser",
+        f"{base} movie trailer",
+        f"{base} trailer",
+    ]
+
+    trailer_ids = {}
+
+    def run_search(search_query):
         try:
-            stdout, _ = proc.communicate(timeout=45)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout, _ = proc.communicate()
-        if not stdout:
-            return []
-        videos = []
-        for line in stdout.strip().split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split("\t")
-            if len(parts) >= 2:
+            proc = subprocess.Popen(
+                ["yt-dlp",
+                 "--print", "%(id)s\t%(title)s\t%(duration)s",
+                 "--no-warnings", "--ignore-errors",
+                 f"ytsearch{max_results}:{search_query}"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+            )
+            try:
+                stdout, _ = proc.communicate(timeout=45)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout, _ = proc.communicate()
+            if not stdout:
+                return
+            for line in stdout.strip().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 2:
+                    continue
                 video_id = parts[0]
                 title = parts[1]
                 duration = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 0
-                if 0 < duration < 600:
-                    videos.append((video_id, title, duration))
-        return videos
-    except Exception:
-        return []
+                lower = title.lower()
+                if not any(k in lower for k in ("trailer", "teaser")):
+                    continue
+                if not (60 <= duration < 600):
+                    continue
+                if video_id not in trailer_ids:
+                    trailer_ids[video_id] = (video_id, title, duration)
+        except Exception:
+            pass
+
+    for q in candidate_queries:
+        run_search(q)
+        if len(trailer_ids) >= 6:
+            break
+
+    videos = list(trailer_ids.values())
+    videos.sort(key=lambda v: (0 if "official" in v[1].lower() else 1, v[1].lower()))
+    return videos
 
 def download_video(video_id):
     output_path = os.path.join(TEMP_VIDEO_DIR, f"{video_id}.mp4")
@@ -86,18 +163,24 @@ def download_video(video_id):
              "-f", "b[height<=480][ext=mp4]/best[ext=mp4]/best",
              "-o", output_path,
              "--no-warnings", "--ignore-errors",
+             "--remote-components", "ejs:github",
+             "--extractor-args", "youtube:player_client=mweb",
              f"https://www.youtube.com/watch?v={video_id}"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
         )
         try:
-            proc.communicate(timeout=180)
+            _, stderr = proc.communicate(timeout=180)
         except subprocess.TimeoutExpired:
             proc.kill()
+            print(f"  Download timeout for {video_id}")
             return None
         if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
             return output_path
+        if stderr:
+            print(f"  yt-dlp error for {video_id}: {stderr.strip()[-200:]}")
         return None
-    except Exception:
+    except Exception as e:
+        print(f"  Download exception for {video_id}: {e}")
         return None
 
 def get_video_info(video_path):
@@ -154,6 +237,33 @@ def extract_frames(video_path):
         pass
 
     return frames
+
+def _dhash_bits(pil_img, hash_size=9):
+    """Perceptual hash (gradient hash). 9x8 grayscale -> 72 bits."""
+    small = pil_img.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)
+    arr = np.asarray(small, dtype=np.int16)
+    return (arr[:, 1:] > arr[:, :-1]).flatten()
+
+def _hamming(a, b):
+    return int((a != b).sum())
+
+def dedupe_similar_frames(scored_frames, similarity_threshold=18):
+    """Thin out near-identical frames so the top-N isn't wasted on duplicates.
+
+    scored_frames is a list of (img, timestamp, score) tuples. Frames that are
+    perceptually indistinguishable from a higher-scoring frame already selected
+    are dropped. Kept frames preserve their original scores.
+    """
+    ordered = sorted(scored_frames, key=lambda x: -x[2])
+    hashes = []
+    kept = []
+    for img, ts, score in ordered:
+        h = _dhash_bits(img)
+        if any(_hamming(h, kh) <= similarity_threshold for kh in hashes):
+            continue
+        hashes.append(h)
+        kept.append((img, ts, score))
+    return kept
 
 def score_frames_batch_multi(frames_pil, text_queries):
     if model is None or preprocess is None or not frames_pil or not text_queries:
@@ -273,9 +383,9 @@ def cleanup_old_files(max_age=3600):
 def load_clip_model():
     global model, preprocess
     try:
-        model, preprocess = clip.load("ViT-B/32", device=device)
+        model, preprocess = clip.load("ViT-B/16", device=device)
         model_ready.set()
-        print(f"CLIP model loaded on {device}")
+        print(f"CLIP ViT-B/16 model loaded on {device}")
     except Exception as e:
         print(f"CLIP load failed: {e}")
 
@@ -484,7 +594,11 @@ def search(
         print(f"  Extracted {len(extracted)} frames, scoring...")
         frame_images = [img for img, _ in extracted]
 
-        clip_texts = [main_query]
+        main_variants = [
+            main_query,
+            f"cinematic film still of {main_query}, movie trailer",
+        ]
+        clip_texts = list(main_variants)
         filter_lookup = {}
         for cat, vals in active_filters.items():
             for v in vals:
@@ -496,7 +610,7 @@ def search(
 
         combined_scores = []
         for i in range(len(frame_images)):
-            main_s = scores_matrix[0][i]
+            main_s = max(scores_matrix[t][i] for t in range(len(main_variants)))
             props = analyze_image_properties(frame_images[i])
             feat = compute_composition_features(frame_images[i])
 
@@ -543,11 +657,11 @@ def search(
 
             combined_scores.append(candidate)
 
-        scored_frames = list(zip(extracted, combined_scores))
-        scored_frames.sort(key=lambda x: -x[1])
-        top_frames = scored_frames[:TOP_FRAMES_PER_VIDEO]
+        scored_triples = [(img, ts, score) for (img, ts), score in zip(extracted, combined_scores)]
+        top_raw = sorted(scored_triples, key=lambda x: -x[2])[:TOP_FRAMES_PER_VIDEO * 2]
+        top_frames = dedupe_similar_frames(top_raw)[:TOP_FRAMES_PER_VIDEO]
 
-        for (img, ts), score in top_frames:
+        for img, ts, score in top_frames:
             filename = save_frame(img, video_id, ts)
             all_results.append({
                 "image_url": f"/frames/{filename}",
