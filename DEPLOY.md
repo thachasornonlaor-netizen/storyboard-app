@@ -2,15 +2,19 @@
 
 Total cost: **$0/yr**. The site keeps running even when your computer is off.
 
-Architecture:
-
 ```
 Browser → Netlify (static frontend, https://yourname.netlify.app)
-                │  (calls VITE_API_URL)
+                │  calls VITE_API_URL
                 ▼
-          Oracle free VM → backend (:3001) → ai-service (:8000)
-                        → yt-dlp / ffmpeg / CLIP / Gemini
+     Oracle free VM → Caddy (:443, free Let's Encrypt via DuckDNS)
+                     → backend (:3001) → ai-service (:8000)
+                     → yt-dlp / ffmpeg / CLIP / Gemini
 ```
+
+Why DuckDNS + Caddy: the frontend is served over HTTPS, so the browser
+refuses to call a plain `http://<ip>:3001` backend (mixed content). Caddy
+gets a real certificate for a free `<you>.duckdns.org` name and gives you
+`https://` for $0. No custom domain needed.
 
 ---
 
@@ -18,73 +22,86 @@ Browser → Netlify (static frontend, https://yourname.netlify.app)
 
 1. Sign up at https://cloud.oracle.com (free tier; asks for a card for
    identity only, never charges).
-2. Create a VM:
+2. Create a Compute **Instance**:
+   - Image: **Ubuntu 24.04** (or 22.04).
    - Shape: **VM.Standard.A1.Flex** (4 OCPU / 24 GB — the free ARM shape).
-   - Ubuntu 22.04+, disk ~50 GB.
-   - Attach a **static public IP** (Network → Reserved Public IP).
-   - Firewall/NSG: allow TCP **3001**.
-3. SSH into the VM and run:
+   - Boot volume ~ **47 GB**.
+   - Under SSH keys, paste the **public** key (see `~/.ssh/oracle_vm.pub`
+     on the machine that generated it).
+   - Network → assign a **Reserved public IP** (so the address never changes).
+3. Add firewall rules **before** the instance boots, or right after:
+   - Networking → Virtual Cloud Network → Security List:
+     allow TCP **80**, **443** (and **3001** if you want direct backend access).
+4. Free hostname (**2 minutes**, no card): https://www.duckdns.org
+   - Sign up, create subdomain e.g. `storyboardai.duckdns.org`, and point it
+     at the VM's public IP in the DuckDNS dashboard.
+5. Run the deploy script over SSH (automates everything: docker, repo,
+   build, Caddy HTTPS, health check):
 
    ```bash
-   sudo apt update && sudo apt install -y docker.io docker-compose-v2 git
-   sudo systemctl enable --now docker
-
-   git clone <your-repo-url>
-   cd storyboard-app
-
-   # real Gemini key (free from https://aistudio.google.com/apikey)
-   echo "GEMINI_API_KEY=your_real_key" > .env
-
-   sudo docker compose -f docker-compose.onprem.yml up -d --build
-
-   # check it's healthy
-   curl http://localhost:3001/api/health
+   ssh -i ~/.ssh/oracle_vm ubuntu@<vm-public-ip> \
+     "sudo curl -fsSL https://raw.githubusercontent.com/thachasornonlaor-netizen/storyboard-app/main/scripts/deploy-vm.sh | sudo bash -s storyboardai.duckdns.org YOUR_REAL_GEMINI_KEY"
    ```
 
-   The compose file has `restart: unless-stopped`, so it survives VM reboots.
+   No real key yet? Run without the last argument; the script prints the
+   one-line command to add/change it afterwards.
 
-> Optional: put Caddy in front for HTTPS to the backend:
-> `sudo apt install -y caddy` then
-> `echo "<backend.yourname.com> { reverse_proxy localhost:3001 }" | sudo tee /etc/caddy/Caddyfile`
-> and set `<backend.yourname.com>` to the VM IP.
+   > The user on the VM is `ubuntu` (Ubuntu images) or `opc` (Oracle Linux).
+   > Sub in whichever you picked.
+
+6. Verify:
+   ```bash
+   curl -s https://storyboardai.duckdns.org/api/health
+   # => {"status":"ok","model_ready":true,...,"vlm":{"configured":true,...}}
+   ```
+   `vlm.configured` must be `true` (means a real `AIza...` key was set).
 
 ---
 
 ## 2. Frontend → Netlify (free)
 
-1. Build locally with the backend URL, or set it as a build var on Netlify:
-
+1. In `frontend/`, set the backend URL, then build:
    ```bash
    cd frontend
    npm install
-   VITE_API_URL=https://<your-vm-public-ip>:3001 npm run build
-   # dist/ is now production-ready
+   VITE_API_URL=https://storyboardai.duckdns.org npm run build
    ```
-
-   Or point Netlify at your GitHub repo and set env var
-   `VITE_API_URL = https://<your-vm-public-ip>:3001` plus build command
-   `npm run build` and publish dir `dist`.
-
-2. Drag-and-drop `frontend/dist` into https://app.netlify.com (or use Git).
-   You get `https://yourname.netlify.app` — free HTTPS included.
-
-3. Done. No custom domain needed; skip it and stay at $0.
+2. Drag-and-drop the `frontend/dist` folder into https://app.netlify.com
+   (or connect the GitHub repo and set env var
+   `VITE_API_URL = https://storyboardai.duckdns.org`, build `npm run build`,
+   publish dir `dist`).
+3. You get `https://yourname.netlify.app` — free HTTPS included. Done. Stay
+   at $0: no custom domain purchase.
 
 ---
 
 ## Health checks
 
-- Backend: `https://<vm-ip>:3001/api/health`
-- AI service VLM status: `https://<vm-ip>:3001/api/health` → `vlm.configured`
-  must be `true` (i.e. a real `GEMINI_API_KEY`, not the placeholder).
+- Backend + AI: `https://storyboardai.duckdns.org/api/health`
+  → `model_ready: true`, `vlm.configured: true` (real key set).
+- Frontend: `https://yourname.netlify.app`
 
-Set a real Gemini key or matching quality drops to CLIP-only (weak).
+---
+
+## Updating after code changes
+
+Rebuild the stack on the VM (new code + real key if changed):
+
+```bash
+ssh -i ~/.ssh/oracle_vm ubuntu@<vm-public-ip> \
+  "cd /opt/storyboard-app && sudo git pull && sudo docker compose -f docker-compose.onprem.yml up -d --build"
+```
+
+Redploy only the frontend by re-uploading `frontend/dist` to Netlify
+(Netlify connected to GitHub redeploys automatically on push).
 
 ---
 
 ## Notes
 
 - Oracle free ARM is always free; free *x86* VMs have a limited monthly
-  allowance — use the A1 ARM shape for "free forever".
+  allowance — use the **A1 ARM** shape for "free forever".
 - Every search downloads a trailer + extracts frames, so bandwidth and CPU
   are used per search — normal, just slower on a free VM (still works).
+- Caddy auto-renews the Let's Encrypt certificate; no maintenance.
+- `docker restart:unless-stopped` + enabled services = survives reboots.
