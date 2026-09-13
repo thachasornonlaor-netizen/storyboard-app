@@ -203,7 +203,7 @@ def _proxy_args():
     return ["--proxy", proxy] if proxy else []
 
 
-DOWNLOAD_CLIENTS = ["mweb", "web", "tv", "ios", "android"]
+DOWNLOAD_CLIENTS = ["android", "tv_embedded", "mweb", "web", "tv", "ios"]
 
 
 def download_video(video_id):
