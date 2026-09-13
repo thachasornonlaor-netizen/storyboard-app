@@ -21,6 +21,7 @@ function App() {
   const [error, setError] = useState('')
   const [appliedFilters, setAppliedFilters] = useState({})
   const lastQueryRef = useRef('')
+  const searchReqRef = useRef(0)
 
   useEffect(() => {
     fetchFilters()
@@ -49,6 +50,39 @@ function App() {
     return params.toString()
   }
 
+  const pollSearch = async (qs) => {
+    const myReq = ++searchReqRef.current
+    let res = await fetch(apiUrl(`/api/search?${qs}`), { method: 'POST' })
+    if (!res.ok) throw new Error('Search failed')
+    const { job_id } = await res.json()
+    if (!job_id) throw new Error('Search failed')
+
+    let failures = 0
+    while (searchReqRef.current === myReq) {
+      await new Promise(r => setTimeout(r, 4000))
+      try {
+        res = await fetch(apiUrl(`/api/search/status?job_id=${encodeURIComponent(job_id)}`))
+        const data = await res.json()
+        if (data.status === 'done') {
+          setResults(data.frames || [])
+          setAppliedFilters(data.applied_filters || {})
+          if (!data.frames || data.frames.length === 0) {
+            setError(data.error || 'No matching frames found.')
+          }
+          fetchFilters()
+          return
+        }
+        if (data.status === 'error' || data.status === 'not_found') {
+          throw new Error(data.error || 'Search failed.')
+        }
+        failures = 0
+      } catch (err) {
+        failures += 1
+        if (failures >= 3) throw err
+      }
+    }
+  }
+
   const searchFrames = async (query, filters) => {
     const effectiveQuery = query || ''
     const effectiveFilters = filters || selectedFilters
@@ -60,14 +94,7 @@ function App() {
     setLastQuery(effectiveQuery)
     lastQueryRef.current = effectiveQuery
     try {
-      const res = await fetch(apiUrl(`/api/search?${qs}`))
-      const data = await res.json()
-      setResults(data.frames || [])
-      setAppliedFilters(data.applied_filters || {})
-      if (data.frames && data.frames.length === 0) {
-        setError(data.error || 'No matching frames found.')
-      }
-      fetchFilters()
+      await pollSearch(qs)
     } catch (err) {
       setError('Search failed.')
     }
@@ -78,11 +105,9 @@ function App() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(apiUrl(`/api/search?film=${encodeURIComponent(movieSlug)}`))
-      const data = await res.json()
-      setResults(data.frames || [])
+      await pollSearch(`film=${encodeURIComponent(movieSlug)}`)
     } catch (err) {
-      console.error('Browse failed:', err)
+      setError('Search failed.')
     }
     setLoading(false)
   }

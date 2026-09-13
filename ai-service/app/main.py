@@ -6,6 +6,7 @@ import threading
 import subprocess
 import tempfile
 from typing import List
+from uuid import uuid4
 import numpy as np
 import clip
 import torch
@@ -135,6 +136,7 @@ def search_youtube(query, max_results=12):
                 ["yt-dlp",
                  "--print", "%(id)s\t%(title)s\t%(duration)s",
                  "--no-warnings", "--ignore-errors",
+                 "--remote-components", "ejs:github",
                  *_cookies_args(),
                  f"ytsearch{max_results}:{search_query}"],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
@@ -563,17 +565,23 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 app.mount("/frames", StaticFiles(directory=EXTRACTED_DIR), name="extracted_frames")
 
-@app.get("/search")
-def search(
-    q: str = Query(default=""),
-    film: str = Query(default=""),
-    camera_angle: List[str] = Query(default=[]),
-    shot_size: List[str] = Query(default=[]),
-    camera_movement: List[str] = Query(default=[]),
-    mood: List[str] = Query(default=[]),
-    tone: List[str] = Query(default=[]),
-    lighting: List[str] = Query(default=[])
+JOBS = {}
+JOBS_LOCK = threading.Lock()
+JOB_TTL_SECONDS = 1800
+
+
+def _run_search_pipeline(
+    q="", film="",
+    camera_angle=None, shot_size=None, camera_movement=None,
+    mood=None, tone=None, lighting=None,
 ):
+    camera_angle = camera_angle or []
+    shot_size = shot_size or []
+    camera_movement = camera_movement or []
+    mood = mood or []
+    tone = tone or []
+    lighting = lighting or []
+
     if not q.strip() and not film:
         return {"frames": []}
 
@@ -765,6 +773,103 @@ def search(
         "applied_filters": {cat: sorted(vals) for cat, vals in active_filters.items()},
         "vlm_rerank": reranked,
     }
+
+SEARCH_LOCK = threading.Lock()
+
+
+def _search_params(
+    q: str = Query(default=""),
+    film: str = Query(default=""),
+    camera_angle: List[str] = Query(default=[]),
+    shot_size: List[str] = Query(default=[]),
+    camera_movement: List[str] = Query(default=[]),
+    mood: List[str] = Query(default=[]),
+    tone: List[str] = Query(default=[]),
+    lighting: List[str] = Query(default=[])
+):
+    return (q, film, camera_angle, shot_size, camera_movement, mood, tone, lighting)
+
+
+def _prune_jobs():
+    now = time.time()
+    for jid in list(JOBS.keys()):
+        if now - JOBS[jid]["created_at"] > JOB_TTL_SECONDS:
+            JOBS.pop(jid, None)
+
+
+def _start_job(params):
+    with JOBS_LOCK:
+        _prune_jobs()
+        job_id = uuid4().hex[:12]
+        JOBS[job_id] = {"status": "queued", "created_at": time.time()}
+    q, film, camera_angle, shot_size, camera_movement, mood, tone, lighting = params
+
+    def worker():
+        try:
+            with SEARCH_LOCK:
+                with JOBS_LOCK:
+                    JOBS[job_id]["status"] = "running"
+                result = _run_search_pipeline(
+                    q, film,
+                    camera_angle, shot_size, camera_movement, mood, tone, lighting,
+                )
+            with JOBS_LOCK:
+                JOBS[job_id].update(result)
+                JOBS[job_id]["status"] = "done"
+        except Exception as e:
+            with JOBS_LOCK:
+                JOBS[job_id]["status"] = "error"
+                JOBS[job_id]["error"] = str(e)
+            print(f"Job {job_id} failed: {e}")
+
+    threading.Thread(target=worker, daemon=True).start()
+    return job_id
+
+
+@app.get("/search")
+def search_sync(
+    q: str = Query(default=""),
+    film: str = Query(default=""),
+    camera_angle: List[str] = Query(default=[]),
+    shot_size: List[str] = Query(default=[]),
+    camera_movement: List[str] = Query(default=[]),
+    mood: List[str] = Query(default=[]),
+    tone: List[str] = Query(default=[]),
+    lighting: List[str] = Query(default=[])
+):
+    with SEARCH_LOCK:
+        return _run_search_pipeline(
+            q, film,
+            camera_angle, shot_size, camera_movement, mood, tone, lighting,
+        )
+
+
+@app.post("/search/jobs")
+def start_search_job(
+    q: str = Query(default=""),
+    film: str = Query(default=""),
+    camera_angle: List[str] = Query(default=[]),
+    shot_size: List[str] = Query(default=[]),
+    camera_movement: List[str] = Query(default=[]),
+    mood: List[str] = Query(default=[]),
+    tone: List[str] = Query(default=[]),
+    lighting: List[str] = Query(default=[])
+):
+    job_id = _start_job((q, film, camera_angle, shot_size, camera_movement, mood, tone, lighting))
+    return {"job_id": job_id}
+
+
+@app.get("/search/jobs/{job_id}")
+def search_job_status(job_id: str):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        return {"status": "not_found"}
+    body = {"status": job["status"]}
+    for key in ("error", "frames", "applied_filters", "vlm_rerank"):
+        if key in job:
+            body[key] = job[key]
+    return body
 
 @app.get("/filters")
 def get_filters():

@@ -13,9 +13,8 @@ function appendFilterParams(params, key, value) {
   vals.forEach(v => params.append(key, v))
 }
 
-app.get('/api/search', async (req, res) => {
-  const { q, film, camera_angle, shot_size, camera_movement, mood, tone, lighting } = req.query
-
+function buildSearchParams(query) {
+  const { q, film, camera_angle, shot_size, camera_movement, mood, tone, lighting } = query
   const params = new URLSearchParams()
   if (q) params.set('q', q)
   if (film) params.set('film', film)
@@ -25,6 +24,11 @@ app.get('/api/search', async (req, res) => {
   appendFilterParams(params, 'mood', mood)
   appendFilterParams(params, 'tone', tone)
   appendFilterParams(params, 'lighting', lighting)
+  return params
+}
+
+app.get('/api/search', async (req, res) => {
+  const params = buildSearchParams(req.query)
 
   try {
     const response = await fetch(`${AI_SERVICE_URL}/search?${params.toString()}`)
@@ -33,6 +37,35 @@ app.get('/api/search', async (req, res) => {
   } catch (err) {
     console.error('AI service error:', err)
     res.status(500).json({ error: 'Search failed' })
+  }
+})
+
+app.post('/api/search', async (req, res) => {
+  const params = buildSearchParams(req.query)
+
+  try {
+    const response = await fetch(`${AI_SERVICE_URL}/search/jobs?${params.toString()}`, { method: 'POST' })
+    const data = await response.json()
+    res.json(data)
+  } catch (err) {
+    console.error('AI service error:', err)
+    res.status(500).json({ error: 'Search failed' })
+  }
+})
+
+app.get('/api/search/status', async (req, res) => {
+  const { job_id } = req.query
+  if (!job_id) {
+    res.status(400).json({ error: 'job_id required' })
+    return
+  }
+  try {
+    const response = await fetch(`${AI_SERVICE_URL}/search/jobs/${encodeURIComponent(job_id)}`)
+    const data = await response.json()
+    res.json(data)
+  } catch (err) {
+    console.error('AI service error:', err)
+    res.status(500).json({ error: 'Failed to fetch search status' })
   }
 })
 
