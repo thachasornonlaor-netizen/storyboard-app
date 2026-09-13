@@ -139,7 +139,7 @@ def search_youtube(query, max_results=12):
                      "--print", "%(id)s\t%(title)s\t%(duration)s",
                      "--no-warnings", "--ignore-errors",
                      "--remote-components", "ejs:github",
-                     *_cookies_args(),
+                     *_cookies_args(), *_proxy_args(),
                      f"ytsearch{max_results}:{search_query}"],
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
                 )
@@ -198,6 +198,11 @@ def search_youtube(query, max_results=12):
     videos = trailers + scenes
     return videos
 
+def _proxy_args():
+    proxy = os.environ.get("YT_PROXY", "").strip()
+    return ["--proxy", proxy] if proxy else []
+
+
 DOWNLOAD_CLIENTS = ["mweb", "web", "tv", "ios", "android"]
 
 
@@ -220,7 +225,7 @@ def download_video(video_id):
                 "--retries", "3", "--fragment-retries", "3",
                 "--remote-components", "ejs:github",
                 "--extractor-args", f"youtube:player_client={client}",
-                *_cookies_args(),
+                *_cookies_args(), *_proxy_args(),
                 f"https://www.youtube.com/watch?v={video_id}",
             ]
             if os.path.exists(output_path):
