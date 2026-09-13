@@ -9,6 +9,7 @@ services:
       - PYTHONUNBUFFERED=1
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - YT_PROXY=${YT_PROXY:-}
 
   backend:
     build: ./backend

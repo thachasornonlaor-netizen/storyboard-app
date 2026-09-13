@@ -26,6 +26,30 @@ done
 [ -n "$URL" ] || { echo "ERROR: no tunnel URL found. VM reachable? cloudflared-tunnel service running?"; exit 1; }
 echo "Tunnel URL: $URL"
 
+echo "==> Syncing GEMINI_API_KEY to VM (if set locally)"
+LOCAL_KEY=""
+if [ -f "$ROOT/.env" ]; then
+    LOCAL_KEY="$(sed -n 's/^GEMINI_API_KEY=//p' "$ROOT/.env" | tail -1)"
+fi
+if [ -n "$LOCAL_KEY" ]; then
+    REMOTE_SCRIPT="$(cat <<EOF
+set -e
+ENV_FILE=/opt/storyboard-app/.env
+if grep -q '^GEMINI_API_KEY=' "\$ENV_FILE"; then
+    sed -i "s|^GEMINI_API_KEY=.*|GEMINI_API_KEY=$LOCAL_KEY|" "\$ENV_FILE"
+else
+    printf 'GEMINI_API_KEY=%s\n' "$LOCAL_KEY" >> "\$ENV_FILE"
+fi
+cd /opt/storyboard-app
+sudo docker compose -f docker-compose.onprem.yml up -d
+EOF
+)"
+    ssh -i "$SSH_KEY" -o ConnectTimeout=10 "$SSH_USER@$VM_IP" "sudo bash -s" <<< "$REMOTE_SCRIPT"
+    echo "==> Gemini key deployed, ai-service restarted"
+else
+    echo "==> No GEMINI_API_KEY found in $ROOT/.env, skipping"
+fi
+
 echo "==> Building frontend against $URL"
 [ -f "$FRONTEND/package-lock.json" ] || (cd "$FRONTEND" && npm install)
 VITE_API_URL="$URL" npm --prefix "$FRONTEND" run build
