@@ -75,6 +75,24 @@ gets a real certificate for a free `<you>.duckdns.org` name and gives you
 
 ---
 
+## Notes on the current live setup (Cloudflare Tunnel, no port opening)
+
+The production backend runs on the Oracle VM behind a **Cloudflare quick
+tunnel** (`cloudflared` auto-starts via a systemd service). This needs **no**
+inbound firewall rules, DuckDNS, or Caddy:
+
+    Browser → Netlify (frontend, https://framefinderai.netlify.app)
+                │  calls VITE_API_URL (trycloudflare https URL)
+                ▼
+        cloudflared tunnel (VM) → backend :3001 → ai-service :8000
+                                              → yt-dlp / ffmpeg / CLIP / Gemini
+
+- Tunnel URL changes on VM reboot. Refresh it (rebuild + redeploy frontend):
+  `./scripts/refresh-tunnel.sh`
+- The Oracle IP is flagged by YouTube as a bot, so yt-dlp needs cookies:
+  export `cookies.txt` (see `scripts/upload-cookies.sh`) and upload with
+  `./scripts/upload-cookies.sh`. Re-upload when searches go empty again.
+
 ## Health checks
 
 - Backend + AI: `https://storyboardai.duckdns.org/api/health`

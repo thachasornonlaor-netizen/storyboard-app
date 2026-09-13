@@ -38,6 +38,12 @@ MAX_VIDEOS_TO_PROCESS = 5
 FRAME_INTERVAL = 60
 TOP_FRAMES_PER_VIDEO = 8
 MAX_RESULTS = 24
+COOKIES_FILE = "/app/data/cookies.txt"
+
+def _cookies_args():
+    if os.path.exists(COOKIES_FILE):
+        return ["--cookies", COOKIES_FILE]
+    return []
 
 def slugify(text):
     s = text.lower().strip()
@@ -129,6 +135,7 @@ def search_youtube(query, max_results=12):
                 ["yt-dlp",
                  "--print", "%(id)s\t%(title)s\t%(duration)s",
                  "--no-warnings", "--ignore-errors",
+                 *_cookies_args(),
                  f"ytsearch{max_results}:{search_query}"],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
             )
@@ -195,6 +202,7 @@ def download_video(video_id):
              "--no-warnings", "--ignore-errors",
              "--remote-components", "ejs:github",
              "--extractor-args", "youtube:player_client=mweb",
+             *_cookies_args(),
              f"https://www.youtube.com/watch?v={video_id}"],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
         )
