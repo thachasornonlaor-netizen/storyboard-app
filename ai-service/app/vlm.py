@@ -24,8 +24,6 @@ def vlm_configured():
         return False
     if key.lower() in PLACEHOLDER_KEYS:
         return False
-    if not key.startswith("AIza"):
-        return False
     return True
 
 
@@ -48,7 +46,12 @@ def _call_gemini(parts):
     payload = {"contents": [{"role": "user", "parts": parts}]}
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": GEMINI_API_KEY,
+        },
     )
     last_error = None
     for attempt in range(MAX_RETRIES + 1):
