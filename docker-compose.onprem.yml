@@ -12,7 +12,7 @@ services:
       - .env
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.6-flash}
       - YT_PROXY=${YT_PROXY:-}
     volumes:
       - ./ai-service/data:/app/data

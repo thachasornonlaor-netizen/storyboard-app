@@ -35,7 +35,7 @@ echo "GEMINI_API_KEY=your_key_here" >> .env
 Optional — override the model:
 
 ```bash
-echo "GEMINI_MODEL=gemini-2.5-flash-lite" >> .env
+echo "GEMINI_MODEL=gemini-3.6-flash-lite" >> .env
 ```
 
 No key? No problem. The app still works, it just falls back to CLIP-only
