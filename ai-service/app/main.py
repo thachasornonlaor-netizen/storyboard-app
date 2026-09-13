@@ -131,49 +131,55 @@ def search_youtube(query, max_results=12):
     scene_ids = {}
 
     def run_search(search_query, allow_scenes):
-        try:
-            proc = subprocess.Popen(
-                ["yt-dlp",
-                 "--print", "%(id)s\t%(title)s\t%(duration)s",
-                 "--no-warnings", "--ignore-errors",
-                 "--remote-components", "ejs:github",
-                 *_cookies_args(),
-                 f"ytsearch{max_results}:{search_query}"],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
-            )
+        stdout = ""
+        for attempt in range(3):
             try:
-                stdout, _ = proc.communicate(timeout=45)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                stdout, _ = proc.communicate()
-            if not stdout:
-                return
-            for line in stdout.strip().split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split("\t")
-                if len(parts) < 2:
-                    continue
-                video_id = parts[0]
-                title = parts[1]
-                duration = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 0
-                if _looks_like_non_movie(title):
-                    continue
-                if not (60 <= duration < 600):
-                    continue
-                lower = title.lower()
-                is_trailer = "trailer" in lower or "teaser" in lower
-                if video_id in trailer_ids:
-                    continue
-                if is_trailer:
-                    if video_id in scene_ids:
-                        scene_ids.pop(video_id, None)
-                    trailer_ids[video_id] = (video_id, title, duration)
-                elif allow_scenes and video_id not in scene_ids:
-                    scene_ids[video_id] = (video_id, title, duration)
-        except Exception:
-            pass
+                proc = subprocess.Popen(
+                    ["yt-dlp",
+                     "--print", "%(id)s\t%(title)s\t%(duration)s",
+                     "--no-warnings", "--ignore-errors",
+                     "--remote-components", "ejs:github",
+                     *_cookies_args(),
+                     f"ytsearch{max_results}:{search_query}"],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+                )
+                try:
+                    stdout, _ = proc.communicate(timeout=45)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    stdout, _ = proc.communicate()
+            except Exception:
+                stdout = ""
+            if stdout:
+                break
+            if attempt < 2:
+                time.sleep(4)
+        if not stdout:
+            return
+        for line in stdout.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            video_id = parts[0]
+            title = parts[1]
+            duration = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 0
+            if _looks_like_non_movie(title):
+                continue
+            if not (60 <= duration < 600):
+                continue
+            lower = title.lower()
+            is_trailer = "trailer" in lower or "teaser" in lower
+            if video_id in trailer_ids:
+                continue
+            if is_trailer:
+                if video_id in scene_ids:
+                    scene_ids.pop(video_id, None)
+                trailer_ids[video_id] = (video_id, title, duration)
+            elif allow_scenes and video_id not in scene_ids:
+                scene_ids[video_id] = (video_id, title, duration)
 
     for q in trailer_queries:
         run_search(q, allow_scenes=False)
@@ -192,36 +198,58 @@ def search_youtube(query, max_results=12):
     videos = trailers + scenes
     return videos
 
+DOWNLOAD_CLIENTS = ["mweb", "web", "tv", "ios", "android"]
+
+
 def download_video(video_id):
     output_path = os.path.join(TEMP_VIDEO_DIR, f"{video_id}.mp4")
     if os.path.exists(output_path):
         return output_path
-    try:
-        proc = subprocess.Popen(
-            ["yt-dlp",
-             "-f", "b[height<=480][ext=mp4]/best[ext=mp4]/best",
-             "-o", output_path,
-             "--no-warnings", "--ignore-errors",
-             "--remote-components", "ejs:github",
-             "--extractor-args", "youtube:player_client=mweb",
-             *_cookies_args(),
-             f"https://www.youtube.com/watch?v={video_id}"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
-        )
-        try:
-            _, stderr = proc.communicate(timeout=180)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            print(f"  Download timeout for {video_id}")
-            return None
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
-            return output_path
-        if stderr:
-            print(f"  yt-dlp error for {video_id}: {stderr.strip()[-200:]}")
-        return None
-    except Exception as e:
-        print(f"  Download exception for {video_id}: {e}")
-        return None
+
+    # YouTube periodically force-flags datacenter IPs with a bot challenge that
+    # answers "Sign in to confirm you're not a bot". It's time-varying: retry
+    # across player clients with short backoff until one slips through.
+    last_err = ""
+    for attempt in range(3):
+        for client in DOWNLOAD_CLIENTS:
+            base_args = [
+                "yt-dlp",
+                "-f", "b[height<=480][ext=mp4]/best[ext=mp4]/best",
+                "-o", output_path,
+                "--no-warnings", "--ignore-errors",
+                "--retries", "3", "--fragment-retries", "3",
+                "--remote-components", "ejs:github",
+                "--extractor-args", f"youtube:player_client={client}",
+                *_cookies_args(),
+                f"https://www.youtube.com/watch?v={video_id}",
+            ]
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+            try:
+                proc = subprocess.Popen(
+                    base_args,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
+                )
+                try:
+                    _, stderr = proc.communicate(timeout=180)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    last_err = "timeout"
+                    continue
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
+                    return output_path
+                if stderr:
+                    last_err = stderr.strip()[-300:]
+            except Exception as e:
+                last_err = str(e)
+        print(f"  (attempt {attempt + 1}/3 failed for {video_id})")
+        time.sleep(6)
+
+    print(f"  yt-dlp error for {video_id}: {last_err}")
+    return None
 
 def get_video_info(video_path):
     result = subprocess.run(
